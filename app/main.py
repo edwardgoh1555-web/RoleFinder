@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
 from app.database import (
@@ -29,7 +29,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+JINJA_ENV = Environment(
+    loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
+    autoescape=True,
+)
 
 
 @asynccontextmanager
@@ -45,7 +48,7 @@ app = FastAPI(title="RoleFinder", lifespan=lifespan)
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard():
     prompt = get_config("search_prompt") or ""
     runs = get_recent_runs(10)
     latest_run_id = get_latest_completed_run_id()
@@ -55,17 +58,14 @@ async def dashboard(request: Request):
     crawl_minute = int(os.environ.get("CRAWL_MINUTE", "0"))
     schedule_label = f"{crawl_hour:02d}:{crawl_minute:02d} daily (server local time)"
 
-    return TEMPLATES.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "prompt": prompt,
-            "runs": runs,
-            "jobs": jobs,
-            "latest_run_id": latest_run_id,
-            "schedule_label": schedule_label,
-        },
+    html = JINJA_ENV.get_template("dashboard.html").render(
+        prompt=prompt,
+        runs=runs,
+        jobs=jobs,
+        latest_run_id=latest_run_id,
+        schedule_label=schedule_label,
     )
+    return HTMLResponse(html)
 
 
 # ── Config API ────────────────────────────────────────────────────────────────
