@@ -1,9 +1,10 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "rolefinder.db"
+DB_PATH = Path(os.environ.get("DB_PATH", str(Path(__file__).parent.parent / "rolefinder.db")))
 
 DEFAULT_PROMPT = """\
 Find job roles that match the following criteria:

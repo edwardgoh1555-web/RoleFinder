@@ -22,7 +22,7 @@
     <button id="triggerBtn" onclick="triggerCrawl()"
       class="bg-white text-blue-900 text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-50 transition flex items-center gap-2">
       <span id="triggerIcon">▶</span>
-      <span id="triggerLabel">Run Now</span>
+      <span id="triggerLabel">Run Trawl Now</span>
     </button>
   </header>
 
@@ -85,7 +85,14 @@
           <h2 class="font-semibold text-sm text-gray-700" id="jobsTitle">
             {% if jobs %}Latest Results — {{ jobs|length }} role{{ 's' if jobs|length != 1 else '' }}{% else %}No results yet{% endif %}
           </h2>
-          <span id="runBadge" class="text-xs text-gray-400"></span>
+          <div class="flex items-center gap-3">
+            <span id="runBadge" class="text-xs text-gray-400"></span>
+            <button id="triggerBtn2" onclick="triggerCrawl()"
+              class="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1.5">
+              <span id="triggerIcon2">▶</span>
+              <span id="triggerLabel2">Run Trawl Now</span>
+            </button>
+          </div>
         </div>
 
         <!-- Live log box (hidden until a crawl is triggered) -->
@@ -184,14 +191,19 @@
   }
 
   // ── Trigger crawl ────────────────────────────────────────────────────────────
-  async function triggerCrawl() {
-    const btn = document.getElementById('triggerBtn');
-    const icon = document.getElementById('triggerIcon');
-    const label = document.getElementById('triggerLabel');
+  function setTriggerState(disabled, icon, label) {
+    ['', '2'].forEach(suffix => {
+      const b = document.getElementById('triggerBtn' + suffix);
+      const i = document.getElementById('triggerIcon' + suffix);
+      const l = document.getElementById('triggerLabel' + suffix);
+      if (b) b.disabled = disabled;
+      if (i) i.textContent = icon;
+      if (l) l.textContent = label;
+    });
+  }
 
-    btn.disabled = true;
-    icon.textContent = '⏳';
-    label.textContent = 'Starting…';
+  async function triggerCrawl() {
+    setTriggerState(true, '⏳', 'Starting…');
 
     try {
       const res = await fetch('/api/crawl/trigger', { method: 'POST' });
@@ -200,13 +212,11 @@
 
       showLog();
       appendLog('Crawl triggered — run #' + runId);
-      label.textContent = 'Running…';
+      setTriggerState(true, '⏳', 'Running…');
 
       startPolling(runId);
     } catch (e) {
-      btn.disabled = false;
-      icon.textContent = '▶';
-      label.textContent = 'Run Now';
+      setTriggerState(false, '▶', 'Run Trawl Now');
       alert('Failed to start crawl. Check the server logs.');
     }
   }
@@ -240,10 +250,6 @@
 
           const statusEl = document.getElementById('logStatus');
           const spinner = document.getElementById('spinner');
-          const btn = document.getElementById('triggerBtn');
-          const icon = document.getElementById('triggerIcon');
-          const label = document.getElementById('triggerLabel');
-
           spinner.classList.remove('spin');
           if (data.status === 'completed') {
             statusEl.textContent = '✓ Complete';
@@ -254,9 +260,7 @@
             statusEl.className = 'text-xs text-red-500 font-medium';
           }
 
-          btn.disabled = false;
-          icon.textContent = '▶';
-          label.textContent = 'Run Now';
+          setTriggerState(false, '▶', 'Run Trawl Now');
 
           refreshHistory();
         }
