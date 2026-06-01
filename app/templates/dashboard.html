@@ -2,65 +2,140 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <title>RoleFinder</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .log-box { font-family: 'Courier New', monospace; }
+    .tab-active   { border-bottom: 2px solid #1e40af; color: #1e40af; font-weight: 600; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
+    .tab-inactive:hover { color: #374151; }
     .spin { animation: spin 1s linear infinite; }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }
+    .score-90 { background:#dcfce7; color:#166534; }
+    .score-80 { background:#dbeafe; color:#1e40af; }
+    .score-70 { background:#fef3c7; color:#92400e; }
+    .score-lo { background:#f3f4f6; color:#6b7280; }
+    .badge-bull  { background:#dcfce7; color:#166534; }
+    .badge-strong{ background:#dbeafe; color:#1e40af; }
+    .badge-stretch{background:#fef3c7; color:#92400e; }
+    .badge-rej   { background:#fee2e2; color:#991b1b; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen text-gray-900">
 
-  <!-- ── Header ── -->
-  <header class="bg-blue-900 text-white px-6 py-4 flex items-center justify-between shadow-lg">
-    <div>
-      <h1 class="text-lg font-bold tracking-tight">RoleFinder</h1>
-      <p class="text-blue-300 text-xs mt-0.5">Daily job intelligence &mdash; schedule: {{ schedule_label }}</p>
-    </div>
+<!-- ── Header ── -->
+<header class="bg-blue-900 text-white px-6 py-4 flex items-center justify-between shadow-lg">
+  <div>
+    <h1 class="text-lg font-bold tracking-tight">RoleFinder</h1>
+    <p class="text-blue-300 text-xs mt-0.5">{{ schedule_label }}</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="crawlStatusBadge" class="hidden text-xs bg-yellow-400 text-yellow-900 font-semibold px-3 py-1 rounded-full">Crawl running…</span>
     <button id="triggerBtn" onclick="triggerCrawl()"
       class="bg-white text-blue-900 text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-50 transition flex items-center gap-2">
       <span id="triggerIcon">▶</span>
       <span id="triggerLabel">Run Trawl Now</span>
     </button>
-  </header>
+  </div>
+</header>
 
-  <div class="max-w-screen-xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+<!-- ── Tab bar ── -->
+<div class="max-w-screen-xl mx-auto px-4 pt-4">
+  <div class="flex gap-1 border-b border-gray-200">
+    {% for id, label in [('accepted','Accepted Jobs'),('misses','Near Misses'),('log','Crawl Log'),('config','Config')] %}
+    <button id="tab-{{ id }}" onclick="switchTab('{{ id }}')"
+      class="px-5 py-3 text-sm transition {{ 'tab-active' if id == 'accepted' else 'tab-inactive' }}">
+      {{ label }}
+      {% if id == 'accepted' and accepted_jobs %}
+        <span class="ml-1.5 bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">{{ accepted_jobs|length }}</span>
+      {% endif %}
+      {% if id == 'misses' and rejected_jobs %}
+        <span class="ml-1.5 bg-gray-100 text-gray-500 text-xs font-semibold px-2 py-0.5 rounded-full">{{ rejected_jobs|length }}</span>
+      {% endif %}
+    </button>
+    {% endfor %}
+  </div>
+</div>
 
-    <!-- ── Left column: Prompt + History ── -->
-    <div class="space-y-5">
+<div class="max-w-screen-xl mx-auto px-4 py-5">
 
-      <!-- Prompt editor -->
+<!-- ══════════════════════════════════════════
+     Tab 1: Accepted Jobs
+════════════════════════════════════════════ -->
+<div id="pane-accepted">
+
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-gray-700" id="acceptedTitle">
+      {% if accepted_jobs %}
+        Latest run — {{ accepted_jobs|length }} accepted role{{ 's' if accepted_jobs|length != 1 else '' }}
+      {% else %}No results yet{% endif %}
+    </h2>
+    <div class="flex items-center gap-3">
+      <span id="runBadge" class="text-xs text-gray-400"></span>
+      <button id="triggerBtn2" onclick="triggerCrawl()"
+        class="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1.5">
+        <span id="triggerIcon2">▶</span>
+        <span id="triggerLabel2">Run Trawl Now</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="acceptedContainer">
+    {% if accepted_jobs %}
+      {{ _render_accepted_table(accepted_jobs) }}
+    {% else %}
+    <div class="text-center py-16 text-gray-300">
+      <div class="text-5xl mb-3">🎯</div>
+      <p class="font-semibold text-gray-400">No accepted roles yet</p>
+      <p class="text-sm mt-1">Run a trawl to start finding matches</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     Tab 2: Near Misses
+════════════════════════════════════════════ -->
+<div id="pane-misses" class="hidden">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="font-semibold text-gray-700" id="missesTitle">
+      {% if rejected_jobs %}{{ rejected_jobs|length }} rejected role{{ 's' if rejected_jobs|length != 1 else '' }}{% else %}No rejected roles yet{% endif %}
+    </h2>
+    <span class="text-xs text-gray-400">Sorted by score · not emailed</span>
+  </div>
+  <div id="missesContainer">
+    {% if rejected_jobs %}
+      {{ _render_misses_table(rejected_jobs) }}
+    {% else %}
+    <div class="text-center py-16 text-gray-300">
+      <div class="text-5xl mb-3">🔍</div>
+      <p class="font-semibold text-gray-400">No near-misses yet</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     Tab 3: Crawl Log
+════════════════════════════════════════════ -->
+<div id="pane-log" class="hidden">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+    <!-- History sidebar -->
+    <div class="lg:col-span-1">
       <div class="bg-white rounded-xl border shadow-sm p-5">
-        <h2 class="font-semibold text-sm text-gray-700 mb-1">Search Criteria</h2>
-        <p class="text-xs text-gray-400 mb-3">Edit what the agent looks for each day. Be specific — role, level, location, stack, industry.</p>
-        <textarea id="promptText" rows="13"
-          class="w-full border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
-        >{{ prompt }}</textarea>
-        <div class="flex items-center gap-3 mt-3">
-          <button onclick="savePrompt()"
-            class="flex-1 bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold py-2 rounded-lg transition">
-            Save
-          </button>
-          <span id="saveMsg" class="text-xs text-gray-400 transition-opacity"></span>
-        </div>
-      </div>
-
-      <!-- Crawl history -->
-      <div class="bg-white rounded-xl border shadow-sm p-5">
-        <h2 class="font-semibold text-sm text-gray-700 mb-3">Crawl History</h2>
+        <h3 class="font-semibold text-sm text-gray-700 mb-3">Crawl History</h3>
         <div id="historyList" class="space-y-1">
           {% for run in runs %}
           <div onclick="loadRun({{ run.id }})"
-            class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 transition border border-transparent hover:border-gray-100 run-row"
+            class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 border border-transparent hover:border-gray-100 run-row"
             data-run-id="{{ run.id }}">
             <div class="flex items-center gap-2">
               <span class="text-gray-500 font-mono">#{{ run.id }}</span>
               <span class="text-gray-400">{{ run.started_at[:16] if run.started_at else '—' }}</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-gray-600 font-medium">{{ run.jobs_found }} jobs</span>
+              <span class="text-gray-600 font-medium">{{ run.jobs_found }}✓</span>
               <span class="px-2 py-0.5 rounded-full font-medium text-[11px]
                 {% if run.status == 'completed' %}bg-green-100 text-green-700
                 {% elif run.status == 'running' %}bg-yellow-100 text-yellow-700
@@ -70,314 +145,377 @@
             </div>
           </div>
           {% else %}
-          <p class="text-xs text-gray-400 px-2">No crawls yet — hit <strong>Run Now</strong> to start.</p>
+          <p class="text-xs text-gray-400 px-2">No crawls yet</p>
           {% endfor %}
         </div>
       </div>
-
     </div>
 
-    <!-- ── Right column: Jobs ── -->
+    <!-- Log panel -->
     <div class="lg:col-span-2">
       <div class="bg-white rounded-xl border shadow-sm p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-sm text-gray-700">Live Log</h3>
+          <span id="logStatus" class="text-xs text-gray-400"></span>
+        </div>
+        <pre id="logBox"
+          class="bg-gray-900 text-green-400 rounded-lg p-3 text-[11px] font-mono h-80 overflow-y-auto whitespace-pre-wrap leading-relaxed"
+        >Select a run from the history to see its log, or trigger a new crawl.</pre>
+      </div>
+    </div>
+  </div>
+</div>
 
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold text-sm text-gray-700" id="jobsTitle">
-            {% if jobs %}Latest Results — {{ jobs|length }} role{{ 's' if jobs|length != 1 else '' }}{% else %}No results yet{% endif %}
-          </h2>
+<!-- ══════════════════════════════════════════
+     Tab 4: Config
+════════════════════════════════════════════ -->
+<div id="pane-config" class="hidden">
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+    <!-- Role Search Prompt -->
+    <div class="bg-white rounded-xl border shadow-sm p-5">
+      <h3 class="font-semibold text-sm text-gray-700 mb-1">Role Search Prompt</h3>
+      <p class="text-xs text-gray-400 mb-3">Describes the target archetype and what to find. Used as context for the discovery agent.</p>
+      <textarea id="cfg_role_search_prompt" rows="16"
+        class="w-full border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+      >{{ cfg.get('role_search_prompt', '') }}</textarea>
+    </div>
+
+    <!-- Evaluator Prompt -->
+    <div class="bg-white rounded-xl border shadow-sm p-5">
+      <h3 class="font-semibold text-sm text-gray-700 mb-1">Evaluator Prompt</h3>
+      <p class="text-xs text-gray-400 mb-3">The scoring and gate criteria. Every discovered job is evaluated against this.</p>
+      <textarea id="cfg_evaluator_prompt" rows="16"
+        class="w-full border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+      >{{ cfg.get('evaluator_prompt', '') }}</textarea>
+    </div>
+
+    <!-- Query Families -->
+    <div class="bg-white rounded-xl border shadow-sm p-5">
+      <h3 class="font-semibold text-sm text-gray-700 mb-1">Query Families</h3>
+      <p class="text-xs text-gray-400 mb-3">One search query per line. Each query is run as an independent web search.</p>
+      <textarea id="cfg_query_families" rows="20"
+        class="w-full border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+      >{{ qf_lines }}</textarea>
+    </div>
+
+    <!-- Settings panel -->
+    <div class="space-y-5">
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+        <h3 class="font-semibold text-sm text-gray-700 mb-4">Thresholds &amp; Options</h3>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Minimum Accept Score (0–100)</label>
+            <input id="cfg_min_accept_score" type="number" min="0" max="100"
+              value="{{ cfg.get('min_accept_score', '70') }}"
+              class="w-full border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <p class="text-xs text-gray-400 mt-1">Jobs scoring below this are rejected. Default: 70.</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Max Source Share % (0–100)</label>
+            <input id="cfg_max_source_share_pct" type="number" min="0" max="100"
+              value="{{ cfg.get('max_source_share_pct', '30') }}"
+              class="w-full border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <p class="text-xs text-gray-400 mt-1">No single source may exceed this % of accepted jobs. Default: 30.</p>
+          </div>
+
           <div class="flex items-center gap-3">
-            <span id="runBadge" class="text-xs text-gray-400"></span>
-            <button id="triggerBtn2" onclick="triggerCrawl()"
-              class="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold px-4 py-2 rounded-lg transition flex items-center gap-1.5">
-              <span id="triggerIcon2">▶</span>
-              <span id="triggerLabel2">Run Trawl Now</span>
-            </button>
+            <input id="cfg_include_rejected_near_misses" type="checkbox"
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              {% if cfg.get('include_rejected_near_misses','true') == 'true' %}checked{% endif %}>
+            <div>
+              <label for="cfg_include_rejected_near_misses" class="text-sm font-medium text-gray-700">
+                Include near-misses in email
+              </label>
+              <p class="text-xs text-gray-400">Show top 5 rejected jobs at the bottom of the daily email.</p>
+            </div>
           </div>
         </div>
+      </div>
 
-        <!-- Live log box (hidden until a crawl is triggered) -->
-        <div id="logWrap" class="hidden mb-4">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Live Log</span>
-            <span id="logStatus" class="text-xs text-yellow-600 font-medium flex items-center gap-1">
-              <svg id="spinner" class="spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
-              </svg>
-              Running…
-            </span>
-          </div>
-          <pre id="logBox"
-            class="log-box bg-gray-900 text-green-400 rounded-lg p-3 text-[11px] h-36 overflow-y-auto whitespace-pre-wrap"></pre>
-        </div>
-
-        <!-- Jobs table -->
-        <div id="jobsContainer" class="overflow-x-auto">
-          {% if jobs %}
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-gray-100">
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Type</th>
-                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
-                <th class="text-left pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for job in jobs %}
-              <tr class="border-b border-gray-50 hover:bg-gray-50">
-                <td class="py-3 pr-4">
-                  {% if job.apply_url %}
-                  <a href="{{ job.apply_url }}" target="_blank" rel="noopener"
-                    class="text-blue-600 hover:underline font-medium text-sm leading-tight block">{{ job.title or 'N/A' }}</a>
-                  {% else %}
-                  <span class="font-medium text-sm">{{ job.title or 'N/A' }}</span>
-                  {% endif %}
-                  {% if job.description %}
-                  <p class="text-xs text-gray-400 mt-0.5 leading-snug">{{ job.description[:90] }}{% if job.description|length > 90 %}…{% endif %}</p>
-                  {% endif %}
-                </td>
-                <td class="py-3 pr-4 text-sm text-gray-700">{{ job.company or '—' }}</td>
-                <td class="py-3 pr-4 text-xs text-gray-500">{{ job.location or '—' }}</td>
-                <td class="py-3 pr-4 text-xs text-gray-500 whitespace-nowrap">{{ job.salary or '—' }}</td>
-                <td class="py-3 pr-4">
-                  <span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[11px] font-medium">{{ job.job_type or '—' }}</span>
-                </td>
-                <td class="py-3 pr-4 text-xs text-gray-500">{{ job.date_posted or '—' }}</td>
-                <td class="py-3 text-xs text-gray-400">{{ job.source or '—' }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% else %}
-          <div id="emptyState" class="text-center py-16 text-gray-300">
-            <div class="text-5xl mb-3">🔍</div>
-            <p class="font-semibold text-gray-400">No results yet</p>
-            <p class="text-sm mt-1 text-gray-300">Run a crawl or wait for the scheduled daily run</p>
-          </div>
-          {% endif %}
-        </div>
-
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+        <button onclick="saveConfig()"
+          class="w-full bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-xl text-sm transition">
+          Save All Config
+        </button>
+        <div id="saveMsg" class="text-xs text-center mt-2 text-gray-400 h-4"></div>
       </div>
     </div>
 
-  </div><!-- /grid -->
+  </div>
+</div>
+
+</div><!-- /main -->
 
 <script>
-  let pollTimer = null;
+// ── Tab switching ───────────────────────────────────────────────────────────
+const TABS = ['accepted','misses','log','config'];
 
-  // ── Save prompt ─────────────────────────────────────────────────────────────
-  async function savePrompt() {
-    const prompt = document.getElementById('promptText').value.trim();
-    const msg = document.getElementById('saveMsg');
-    if (!prompt) return;
+function switchTab(name) {
+  TABS.forEach(t => {
+    document.getElementById('pane-' + t).classList.toggle('hidden', t !== name);
+    const btn = document.getElementById('tab-' + t);
+    btn.className = btn.className.replace(/tab-active|tab-inactive/g, '').trim();
+    btn.classList.add(t === name ? 'tab-active' : 'tab-inactive');
+  });
+}
 
-    try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-      if (!res.ok) throw new Error();
-      msg.textContent = '✓ Saved';
-      msg.className = 'text-xs text-green-600 transition-opacity';
-    } catch {
-      msg.textContent = '✗ Error';
-      msg.className = 'text-xs text-red-500 transition-opacity';
-    }
-    setTimeout(() => { msg.textContent = ''; }, 2500);
+// ── Trigger state (two buttons) ─────────────────────────────────────────────
+function setTriggerState(disabled, icon, label) {
+  ['', '2'].forEach(s => {
+    const b = document.getElementById('triggerBtn' + s);
+    const i = document.getElementById('triggerIcon' + s);
+    const l = document.getElementById('triggerLabel' + s);
+    if (b) b.disabled = disabled;
+    if (i) i.textContent = icon;
+    if (l) l.textContent = label;
+  });
+  const badge = document.getElementById('crawlStatusBadge');
+  if (badge) badge.classList.toggle('hidden', !disabled);
+}
+
+// ── Trigger crawl ──────────────────────────────────────────────────────────
+async function triggerCrawl() {
+  setTriggerState(true, '⏳', 'Starting…');
+  try {
+    const res  = await fetch('/api/crawl/trigger', { method: 'POST' });
+    const data = await res.json();
+    switchTab('log');
+    document.getElementById('logBox').textContent = 'Crawl triggered — run #' + data.run_id + '\n';
+    document.getElementById('logStatus').textContent = '⏳ Running…';
+    setTriggerState(true, '⏳', 'Running…');
+    startPolling(data.run_id);
+  } catch (e) {
+    setTriggerState(false, '▶', 'Run Trawl Now');
+    alert('Failed to start crawl. Check server logs.');
   }
+}
 
-  // ── Trigger crawl ────────────────────────────────────────────────────────────
-  function setTriggerState(disabled, icon, label) {
-    ['', '2'].forEach(suffix => {
-      const b = document.getElementById('triggerBtn' + suffix);
-      const i = document.getElementById('triggerIcon' + suffix);
-      const l = document.getElementById('triggerLabel' + suffix);
-      if (b) b.disabled = disabled;
-      if (i) i.textContent = icon;
-      if (l) l.textContent = label;
-    });
-  }
+// ── Poll log ───────────────────────────────────────────────────────────────
+let _pollTimer = null;
 
-  async function triggerCrawl() {
-    setTriggerState(true, '⏳', 'Starting…');
-
+function startPolling(runId) {
+  if (_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(async () => {
     try {
-      const res = await fetch('/api/crawl/trigger', { method: 'POST' });
+      const res  = await fetch('/api/crawl/runs/' + runId + '/log');
       const data = await res.json();
-      const runId = data.run_id;
-
-      showLog();
-      appendLog('Crawl triggered — run #' + runId);
-      setTriggerState(true, '⏳', 'Running…');
-
-      startPolling(runId);
-    } catch (e) {
-      setTriggerState(false, '▶', 'Run Trawl Now');
-      alert('Failed to start crawl. Check the server logs.');
-    }
-  }
-
-  // ── Log helpers ──────────────────────────────────────────────────────────────
-  function showLog() {
-    document.getElementById('logWrap').classList.remove('hidden');
-  }
-
-  function appendLog(text) {
-    const box = document.getElementById('logBox');
-    box.textContent = text;
-    box.scrollTop = box.scrollHeight;
-  }
-
-  // ── Poll for crawl status ────────────────────────────────────────────────────
-  function startPolling(runId) {
-    if (pollTimer) clearInterval(pollTimer);
-
-    pollTimer = setInterval(async () => {
-      try {
-        const res = await fetch('/api/crawl/runs/' + runId + '/log');
-        const data = await res.json();
-
-        if (data.log) appendLog(data.log.trim());
-
-        const done = data.status === 'completed' || data.status === 'failed';
-        if (done) {
-          clearInterval(pollTimer);
-          pollTimer = null;
-
-          const statusEl = document.getElementById('logStatus');
-          const spinner = document.getElementById('spinner');
-          spinner.classList.remove('spin');
-          if (data.status === 'completed') {
-            statusEl.textContent = '✓ Complete';
-            statusEl.className = 'text-xs text-green-600 font-medium';
-            await loadRun(runId);
-          } else {
-            statusEl.textContent = '✗ Failed — see log';
-            statusEl.className = 'text-xs text-red-500 font-medium';
-          }
-
-          setTriggerState(false, '▶', 'Run Trawl Now');
-
+      const box  = document.getElementById('logBox');
+      if (data.log) { box.textContent = data.log.trim(); box.scrollTop = box.scrollHeight; }
+      if (data.status === 'completed' || data.status === 'failed') {
+        clearInterval(_pollTimer); _pollTimer = null;
+        setTriggerState(false, '▶', 'Run Trawl Now');
+        const statusEl = document.getElementById('logStatus');
+        if (data.status === 'completed') {
+          statusEl.textContent = '✓ Complete';
+          statusEl.className = 'text-xs text-green-600 font-medium';
+          await loadRun(runId);
           refreshHistory();
+        } else {
+          statusEl.textContent = '✗ Failed';
+          statusEl.className = 'text-xs text-red-500 font-medium';
         }
-      } catch (e) { /* ignore transient errors */ }
-    }, 2000);
-  }
+      }
+    } catch (e) { /* ignore transient */ }
+  }, 2000);
+}
 
-  // ── Load jobs for a specific run ─────────────────────────────────────────────
-  async function loadRun(runId) {
-    try {
-      const res = await fetch('/api/crawl/runs/' + runId + '/jobs');
-      const jobs = await res.json();
+// ── Load run ───────────────────────────────────────────────────────────────
+async function loadRun(runId) {
+  try {
+    const [accRes, rejRes] = await Promise.all([
+      fetch('/api/crawl/runs/' + runId + '/jobs?decision=accepted'),
+      fetch('/api/crawl/runs/' + runId + '/jobs?decision=rejected'),
+    ]);
+    const accepted = await accRes.json();
+    const rejected = await rejRes.json();
 
-      document.getElementById('jobsTitle').textContent =
-        'Run #' + runId + ' — ' + jobs.length + ' role' + (jobs.length !== 1 ? 's' : '');
+    document.getElementById('acceptedTitle').textContent =
+      'Run #' + runId + ' — ' + accepted.length + ' accepted role' + (accepted.length !== 1 ? 's' : '');
+    document.getElementById('missesTitle').textContent =
+      rejected.length + ' rejected role' + (rejected.length !== 1 ? 's' : '');
 
-      renderJobs(jobs);
-      highlightRun(runId);
-    } catch (e) {
-      console.error('loadRun failed', e);
-    }
-  }
+    document.getElementById('acceptedContainer').innerHTML =
+      accepted.length ? renderAccepted(accepted) : emptyState('🎯', 'No accepted roles in this run');
+    document.getElementById('missesContainer').innerHTML =
+      rejected.length ? renderMisses(rejected) : emptyState('🔍', 'No rejections in this run');
 
-  function highlightRun(runId) {
-    document.querySelectorAll('.run-row').forEach(el => {
-      el.classList.toggle('bg-blue-50', Number(el.dataset.runId) === runId);
-      el.classList.toggle('border-blue-200', Number(el.dataset.runId) === runId);
-    });
-  }
+    // Update tab counts
+    updateTabCount('accepted', accepted.length);
+    updateTabCount('misses', rejected.length);
+    highlightRun(runId);
+  } catch (e) { console.error(e); }
+}
 
-  // ── Refresh history sidebar ──────────────────────────────────────────────────
-  async function refreshHistory() {
-    try {
-      const res = await fetch('/api/crawl/runs');
-      const runs = await res.json();
+function updateTabCount(tab, count) {
+  const btn = document.getElementById('tab-' + tab);
+  const span = btn.querySelector('span');
+  if (span) span.textContent = count;
+  else if (count > 0) btn.innerHTML += `<span class="ml-1.5 bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">${count}</span>`;
+}
 
-      const list = document.getElementById('historyList');
-      list.innerHTML = runs.map(r => {
-        const badge = r.status === 'completed'
-          ? 'bg-green-100 text-green-700'
-          : r.status === 'running'
-          ? 'bg-yellow-100 text-yellow-700'
-          : 'bg-red-100 text-red-700';
-        const date = r.started_at ? r.started_at.slice(0, 16) : '—';
-        return `<div onclick="loadRun(${r.id})"
-          class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 transition border border-transparent hover:border-gray-100 run-row"
-          data-run-id="${r.id}">
-          <div class="flex items-center gap-2">
-            <span class="text-gray-500 font-mono">#${r.id}</span>
-            <span class="text-gray-400">${date}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-gray-600 font-medium">${r.jobs_found} jobs</span>
-            <span class="px-2 py-0.5 rounded-full font-medium text-[11px] ${badge}">${r.status}</span>
-          </div>
-        </div>`;
-      }).join('');
-    } catch (e) { /* ignore */ }
-  }
+function highlightRun(runId) {
+  document.querySelectorAll('.run-row').forEach(el => {
+    const active = Number(el.dataset.runId) === runId;
+    el.classList.toggle('bg-blue-50', active);
+    el.classList.toggle('border-blue-200', active);
+  });
+}
 
-  // ── Render jobs table ────────────────────────────────────────────────────────
-  function esc(s) {
-    if (!s) return '';
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function renderJobs(jobs) {
-    const container = document.getElementById('jobsContainer');
-    if (!jobs.length) {
-      container.innerHTML = `
-        <div class="text-center py-16 text-gray-300">
-          <div class="text-5xl mb-3">🔍</div>
-          <p class="font-semibold text-gray-400">No matching roles in this run</p>
-          <p class="text-sm mt-1">Try broadening your search criteria</p>
-        </div>`;
-      return;
-    }
-
-    const rows = jobs.map(j => {
-      const title = j.apply_url
-        ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium text-sm leading-tight block">${esc(j.title) || 'N/A'}</a>`
-        : `<span class="font-medium text-sm">${esc(j.title) || 'N/A'}</span>`;
-      const desc = j.description
-        ? `<p class="text-xs text-gray-400 mt-0.5 leading-snug">${esc(j.description).slice(0, 90)}${j.description.length > 90 ? '…' : ''}</p>`
-        : '';
-      return `
-        <tr class="border-b border-gray-50 hover:bg-gray-50">
-          <td class="py-3 pr-4">${title}${desc}</td>
-          <td class="py-3 pr-4 text-sm text-gray-700">${esc(j.company) || '—'}</td>
-          <td class="py-3 pr-4 text-xs text-gray-500">${esc(j.location) || '—'}</td>
-          <td class="py-3 pr-4 text-xs text-gray-500 whitespace-nowrap">${esc(j.salary) || '—'}</td>
-          <td class="py-3 pr-4"><span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[11px] font-medium">${esc(j.job_type) || '—'}</span></td>
-          <td class="py-3 pr-4 text-xs text-gray-500">${esc(j.date_posted) || '—'}</td>
-          <td class="py-3 text-xs text-gray-400">${esc(j.source) || '—'}</td>
-        </tr>`;
+async function refreshHistory() {
+  try {
+    const res  = await fetch('/api/crawl/runs');
+    const runs = await res.json();
+    const list = document.getElementById('historyList');
+    list.innerHTML = runs.map(r => {
+      const badge = r.status === 'completed'
+        ? 'bg-green-100 text-green-700'
+        : r.status === 'running'
+        ? 'bg-yellow-100 text-yellow-700'
+        : 'bg-red-100 text-red-700';
+      return `<div onclick="loadRun(${r.id})"
+        class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 border border-transparent hover:border-gray-100 run-row"
+        data-run-id="${r.id}">
+        <div class="flex items-center gap-2">
+          <span class="text-gray-500 font-mono">#${r.id}</span>
+          <span class="text-gray-400">${(r.started_at||'').slice(0,16)}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-gray-600 font-medium">${r.jobs_found}✓</span>
+          <span class="px-2 py-0.5 rounded-full font-medium text-[11px] ${badge}">${r.status}</span>
+        </div>
+      </div>`;
     }).join('');
+  } catch (e) {}
+}
 
-    container.innerHTML = `
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-gray-100">
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Type</th>
-            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
-            <th class="text-left pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+// ── Render helpers ──────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function scoreBadge(score) {
+  const n = score || 0;
+  const cls = n >= 90 ? 'score-90' : n >= 80 ? 'score-80' : n >= 70 ? 'score-70' : 'score-lo';
+  return `<span class="${cls} text-xs font-bold px-2 py-0.5 rounded-full">${n}</span>`;
+}
+
+function categoryPill(cat) {
+  const cls = cat === 'Bullseye' ? 'badge-bull'
+            : cat === 'Strong fit' ? 'badge-strong'
+            : (cat === 'Stretch' || cat === 'Backup') ? 'badge-stretch'
+            : 'badge-rej';
+  return `<span class="${cls} text-[11px] font-semibold px-2 py-0.5 rounded-full">${esc(cat)||'—'}</span>`;
+}
+
+function renderAccepted(jobs) {
+  if (!jobs.length) return emptyState('🎯', 'No accepted roles');
+  const rows = jobs.map(j => {
+    const title = j.apply_url
+      ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium">${esc(j.title)||'N/A'}</a>`
+      : `<span class="font-medium">${esc(j.title)||'N/A'}</span>`;
+    const subs = [
+      j.evaluator_reason ? `<p class="text-xs text-green-700 mt-0.5">✓ ${esc(j.evaluator_reason)}</p>` : '',
+      j.main_risk         ? `<p class="text-xs text-amber-700 mt-0.5">⚠ ${esc(j.main_risk)}</p>` : '',
+      j.application_angle ? `<p class="text-xs text-blue-700 mt-0.5">→ ${esc(j.application_angle)}</p>` : '',
+    ].join('');
+    const dupe = j.duplicate_seen_before
+      ? '<span class="ml-2 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">seen before</span>' : '';
+    return `<tr class="border-b border-gray-50 hover:bg-gray-50">
+      <td class="py-3 pr-3 text-center align-top">${scoreBadge(j.fit_score)}</td>
+      <td class="py-3 pr-3 align-top">${categoryPill(j.fit_category)}</td>
+      <td class="py-3 pr-4 align-top min-w-[200px]">${title}${dupe}${subs}</td>
+      <td class="py-3 pr-4 text-sm text-gray-700 align-top">${esc(j.company)||'—'}</td>
+      <td class="py-3 pr-4 text-xs text-gray-500 align-top">${esc(j.location)||'—'}</td>
+      <td class="py-3 pr-4 text-xs text-gray-500 align-top whitespace-nowrap">${esc(j.salary)||'—'}</td>
+      <td class="py-3 pr-4 text-xs text-gray-500 align-top">${esc(j.date_posted)||'—'}</td>
+      <td class="py-3 text-xs text-gray-400 align-top">${esc(j.source)||'—'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="overflow-x-auto"><table class="w-full text-sm">
+    <thead><tr class="border-b border-gray-100">
+      <th class="pb-3 pr-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-center">Score</th>
+      <th class="pb-3 pr-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Category</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
+      <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderMisses(jobs) {
+  if (!jobs.length) return emptyState('🔍', 'No near-misses');
+  const rows = jobs.map(j => {
+    const rtype = (j.rejection_type||'—').replace(/_/g,' ');
+    return `<tr class="border-b border-gray-50 hover:bg-gray-50">
+      <td class="py-2.5 pr-4 text-sm">${esc(j.title)||'N/A'}<br>
+          <span class="text-xs text-gray-400">${esc(j.company)||''}</span></td>
+      <td class="py-2.5 pr-4">${scoreBadge(j.fit_score)}</td>
+      <td class="py-2.5 pr-4 text-xs text-amber-700">${esc(rtype)}</td>
+      <td class="py-2.5 pr-4 text-xs text-gray-500">${esc(j.evaluator_reason)||'—'}</td>
+      <td class="py-2.5 text-xs text-gray-400">${esc(j.source)||'—'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="overflow-x-auto"><table class="w-full text-sm">
+    <thead><tr class="border-b border-gray-100">
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Score</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Rejection Type</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Reason</th>
+      <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function emptyState(icon, msg) {
+  return `<div class="text-center py-16"><div class="text-4xl mb-3">${icon}</div>
+    <p class="text-gray-400 font-medium">${msg}</p></div>`;
+}
+
+// ── Save config ─────────────────────────────────────────────────────────────
+async function saveConfig() {
+  const msg = document.getElementById('saveMsg');
+  const body = {
+    role_search_prompt:           document.getElementById('cfg_role_search_prompt').value,
+    evaluator_prompt:             document.getElementById('cfg_evaluator_prompt').value,
+    query_families:               document.getElementById('cfg_query_families').value,
+    min_accept_score:             document.getElementById('cfg_min_accept_score').value,
+    max_source_share_pct:         document.getElementById('cfg_max_source_share_pct').value,
+    include_rejected_near_misses: document.getElementById('cfg_include_rejected_near_misses').checked ? 'true' : 'false',
+  };
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error();
+    msg.textContent = '✓ Saved';
+    msg.className = 'text-xs text-center mt-2 text-green-600 h-4';
+  } catch {
+    msg.textContent = '✗ Error saving';
+    msg.className = 'text-xs text-center mt-2 text-red-500 h-4';
   }
+  setTimeout(() => { msg.textContent = ''; }, 3000);
+}
+
+// ── Load initial log for latest run ─────────────────────────────────────────
+{% if latest_run_id %}
+(async () => {
+  const res = await fetch('/api/crawl/runs/{{ latest_run_id }}/log').catch(() => null);
+  if (!res) return;
+  const data = await res.json();
+  if (data.log) document.getElementById('logBox').textContent = data.log.trim();
+})();
+{% endif %}
 </script>
 
 </body>

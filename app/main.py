@@ -1,9 +1,10 @@
-import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -13,8 +14,9 @@ from pydantic import BaseModel
 from app.database import (
     create_crawl_run,
     finish_crawl_run,
+    get_all_config,
     get_config,
-    get_jobs_for_run,
+    get_jobs_for_run_by_decision,
     get_latest_completed_run_id,
     get_recent_runs,
     get_run_log,
@@ -49,19 +51,28 @@ app = FastAPI(title="RoleFinder", lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    prompt = get_config("search_prompt") or ""
+    cfg = get_all_config()
     runs = get_recent_runs(10)
     latest_run_id = get_latest_completed_run_id()
-    jobs = get_jobs_for_run(latest_run_id) if latest_run_id else []
+    accepted_jobs = get_jobs_for_run_by_decision(latest_run_id, "accepted") if latest_run_id else []
+    rejected_jobs = get_jobs_for_run_by_decision(latest_run_id, "rejected") if latest_run_id else []
 
-    crawl_hour = int(os.environ.get("CRAWL_HOUR", "8"))
+    crawl_hour   = int(os.environ.get("CRAWL_HOUR", "5"))
     crawl_minute = int(os.environ.get("CRAWL_MINUTE", "0"))
     schedule_label = f"{crawl_hour:02d}:{crawl_minute:02d} daily (server local time)"
 
+    # Parse query_families for display (one per line)
+    try:
+        qf_lines = "\n".join(json.loads(cfg.get("query_families") or "[]"))
+    except Exception:
+        qf_lines = cfg.get("query_families") or ""
+
     html = JINJA_ENV.get_template("dashboard.html").render(
-        prompt=prompt,
+        cfg=cfg,
+        qf_lines=qf_lines,
         runs=runs,
-        jobs=jobs,
+        accepted_jobs=accepted_jobs,
+        rejected_jobs=rejected_jobs,
         latest_run_id=latest_run_id,
         schedule_label=schedule_label,
     )
@@ -71,19 +82,47 @@ async def dashboard():
 # ── Config API ────────────────────────────────────────────────────────────────
 
 class ConfigUpdate(BaseModel):
-    prompt: str
+    role_search_prompt:           Optional[str] = None
+    evaluator_prompt:             Optional[str] = None
+    query_families:               Optional[str] = None   # newline-separated on frontend
+    min_accept_score:             Optional[str] = None
+    max_source_share_pct:         Optional[str] = None
+    include_rejected_near_misses: Optional[str] = None
+    # backwards compat
+    prompt:                       Optional[str] = None
 
 
 @app.get("/api/config")
 def api_get_config():
-    return {"search_prompt": get_config("search_prompt")}
+    cfg = get_all_config()
+    try:
+        cfg["query_families_lines"] = "\n".join(json.loads(cfg.get("query_families") or "[]"))
+    except Exception:
+        cfg["query_families_lines"] = cfg.get("query_families") or ""
+    return cfg
 
 
 @app.post("/api/config")
 def api_set_config(body: ConfigUpdate):
-    if not body.prompt.strip():
-        raise HTTPException(400, "Prompt cannot be empty")
-    set_config("search_prompt", body.prompt.strip())
+    mapping = {
+        "role_search_prompt":           body.role_search_prompt,
+        "evaluator_prompt":             body.evaluator_prompt,
+        "min_accept_score":             body.min_accept_score,
+        "max_source_share_pct":         body.max_source_share_pct,
+        "include_rejected_near_misses": body.include_rejected_near_misses,
+    }
+    for key, val in mapping.items():
+        if val is not None:
+            set_config(key, val.strip() if isinstance(val, str) else val)
+
+    # query_families arrives as newline-separated; store as JSON array
+    if body.query_families is not None:
+        lines = [l.strip() for l in body.query_families.splitlines() if l.strip()]
+        set_config("query_families", json.dumps(lines))
+
+    if body.prompt is not None:
+        set_config("role_search_prompt", body.prompt.strip())
+
     return {"ok": True}
 
 
@@ -96,7 +135,6 @@ _active_run_id: int | None = None
 async def api_trigger_crawl(background_tasks: BackgroundTasks):
     global _active_run_id
 
-    # Prevent double-trigger
     if _active_run_id is not None:
         log = get_run_log(_active_run_id)
         if log and log.get("status") == "running":
@@ -111,11 +149,24 @@ async def api_trigger_crawl(background_tasks: BackgroundTasks):
         from app.emailer import send_job_report
 
         try:
-            jobs = await run_crawl(run_id)
-            send_job_report(jobs, datetime.now())
+            accepted = await run_crawl(run_id)
+
+            cfg = get_all_config()
+            include_nm = cfg.get("include_rejected_near_misses", "true").lower() == "true"
+            near_misses = get_jobs_for_run_by_decision(run_id, "rejected")
+            near_misses_top5 = sorted(
+                near_misses, key=lambda j: -(j.get("fit_score") or 0)
+            )[:5]
+
+            send_job_report(
+                accepted_jobs=[j for j in accepted if not j.get("duplicate_seen_before")],
+                near_misses=near_misses_top5,
+                run_date=datetime.now(),
+                include_near_misses=include_nm,
+            )
         except Exception as exc:
             finish_crawl_run(run_id, "failed", error=str(exc))
-            logger.error("Manual crawl %d failed: %s", run_id, exc)
+            logger.error("Crawl %d failed: %s", run_id, exc)
         finally:
             _active_run_id = None
 
@@ -129,8 +180,8 @@ def api_list_runs():
 
 
 @app.get("/api/crawl/runs/{run_id}/jobs")
-def api_get_jobs(run_id: int):
-    return get_jobs_for_run(run_id)
+def api_get_jobs(run_id: int, decision: Optional[str] = None):
+    return get_jobs_for_run_by_decision(run_id, decision)
 
 
 @app.get("/api/crawl/runs/{run_id}/log")
