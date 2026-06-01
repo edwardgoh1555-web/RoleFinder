@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoleFinder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .log-box { font-family: 'Courier New', monospace; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-900">
+
+  <!-- ── Header ── -->
+  <header class="bg-blue-900 text-white px-6 py-4 flex items-center justify-between shadow-lg">
+    <div>
+      <h1 class="text-lg font-bold tracking-tight">RoleFinder</h1>
+      <p class="text-blue-300 text-xs mt-0.5">Daily job intelligence &mdash; schedule: {{ schedule_label }}</p>
+    </div>
+    <button id="triggerBtn" onclick="triggerCrawl()"
+      class="bg-white text-blue-900 text-sm font-semibold px-4 py-2 rounded-lg hover:bg-blue-50 transition flex items-center gap-2">
+      <span id="triggerIcon">▶</span>
+      <span id="triggerLabel">Run Now</span>
+    </button>
+  </header>
+
+  <div class="max-w-screen-xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- ── Left column: Prompt + History ── -->
+    <div class="space-y-5">
+
+      <!-- Prompt editor -->
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+        <h2 class="font-semibold text-sm text-gray-700 mb-1">Search Criteria</h2>
+        <p class="text-xs text-gray-400 mb-3">Edit what the agent looks for each day. Be specific — role, level, location, stack, industry.</p>
+        <textarea id="promptText" rows="13"
+          class="w-full border border-gray-200 rounded-lg p-3 text-xs font-mono text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
+        >{{ prompt }}</textarea>
+        <div class="flex items-center gap-3 mt-3">
+          <button onclick="savePrompt()"
+            class="flex-1 bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold py-2 rounded-lg transition">
+            Save
+          </button>
+          <span id="saveMsg" class="text-xs text-gray-400 transition-opacity"></span>
+        </div>
+      </div>
+
+      <!-- Crawl history -->
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+        <h2 class="font-semibold text-sm text-gray-700 mb-3">Crawl History</h2>
+        <div id="historyList" class="space-y-1">
+          {% for run in runs %}
+          <div onclick="loadRun({{ run.id }})"
+            class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 transition border border-transparent hover:border-gray-100 run-row"
+            data-run-id="{{ run.id }}">
+            <div class="flex items-center gap-2">
+              <span class="text-gray-500 font-mono">#{{ run.id }}</span>
+              <span class="text-gray-400">{{ run.started_at[:16] if run.started_at else '—' }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-gray-600 font-medium">{{ run.jobs_found }} jobs</span>
+              <span class="px-2 py-0.5 rounded-full font-medium text-[11px]
+                {% if run.status == 'completed' %}bg-green-100 text-green-700
+                {% elif run.status == 'running' %}bg-yellow-100 text-yellow-700
+                {% else %}bg-red-100 text-red-700{% endif %}">
+                {{ run.status }}
+              </span>
+            </div>
+          </div>
+          {% else %}
+          <p class="text-xs text-gray-400 px-2">No crawls yet — hit <strong>Run Now</strong> to start.</p>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Right column: Jobs ── -->
+    <div class="lg:col-span-2">
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-sm text-gray-700" id="jobsTitle">
+            {% if jobs %}Latest Results — {{ jobs|length }} role{{ 's' if jobs|length != 1 else '' }}{% else %}No results yet{% endif %}
+          </h2>
+          <span id="runBadge" class="text-xs text-gray-400"></span>
+        </div>
+
+        <!-- Live log box (hidden until a crawl is triggered) -->
+        <div id="logWrap" class="hidden mb-4">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Live Log</span>
+            <span id="logStatus" class="text-xs text-yellow-600 font-medium flex items-center gap-1">
+              <svg id="spinner" class="spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+              </svg>
+              Running…
+            </span>
+          </div>
+          <pre id="logBox"
+            class="log-box bg-gray-900 text-green-400 rounded-lg p-3 text-[11px] h-36 overflow-y-auto whitespace-pre-wrap"></pre>
+        </div>
+
+        <!-- Jobs table -->
+        <div id="jobsContainer" class="overflow-x-auto">
+          {% if jobs %}
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-gray-100">
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Type</th>
+                <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
+                <th class="text-left pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for job in jobs %}
+              <tr class="border-b border-gray-50 hover:bg-gray-50">
+                <td class="py-3 pr-4">
+                  {% if job.apply_url %}
+                  <a href="{{ job.apply_url }}" target="_blank" rel="noopener"
+                    class="text-blue-600 hover:underline font-medium text-sm leading-tight block">{{ job.title or 'N/A' }}</a>
+                  {% else %}
+                  <span class="font-medium text-sm">{{ job.title or 'N/A' }}</span>
+                  {% endif %}
+                  {% if job.description %}
+                  <p class="text-xs text-gray-400 mt-0.5 leading-snug">{{ job.description[:90] }}{% if job.description|length > 90 %}…{% endif %}</p>
+                  {% endif %}
+                </td>
+                <td class="py-3 pr-4 text-sm text-gray-700">{{ job.company or '—' }}</td>
+                <td class="py-3 pr-4 text-xs text-gray-500">{{ job.location or '—' }}</td>
+                <td class="py-3 pr-4 text-xs text-gray-500 whitespace-nowrap">{{ job.salary or '—' }}</td>
+                <td class="py-3 pr-4">
+                  <span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[11px] font-medium">{{ job.job_type or '—' }}</span>
+                </td>
+                <td class="py-3 pr-4 text-xs text-gray-500">{{ job.date_posted or '—' }}</td>
+                <td class="py-3 text-xs text-gray-400">{{ job.source or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <div id="emptyState" class="text-center py-16 text-gray-300">
+            <div class="text-5xl mb-3">🔍</div>
+            <p class="font-semibold text-gray-400">No results yet</p>
+            <p class="text-sm mt-1 text-gray-300">Run a crawl or wait for the scheduled daily run</p>
+          </div>
+          {% endif %}
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /grid -->
+
+<script>
+  let pollTimer = null;
+
+  // ── Save prompt ─────────────────────────────────────────────────────────────
+  async function savePrompt() {
+    const prompt = document.getElementById('promptText').value.trim();
+    const msg = document.getElementById('saveMsg');
+    if (!prompt) return;
+
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      if (!res.ok) throw new Error();
+      msg.textContent = '✓ Saved';
+      msg.className = 'text-xs text-green-600 transition-opacity';
+    } catch {
+      msg.textContent = '✗ Error';
+      msg.className = 'text-xs text-red-500 transition-opacity';
+    }
+    setTimeout(() => { msg.textContent = ''; }, 2500);
+  }
+
+  // ── Trigger crawl ────────────────────────────────────────────────────────────
+  async function triggerCrawl() {
+    const btn = document.getElementById('triggerBtn');
+    const icon = document.getElementById('triggerIcon');
+    const label = document.getElementById('triggerLabel');
+
+    btn.disabled = true;
+    icon.textContent = '⏳';
+    label.textContent = 'Starting…';
+
+    try {
+      const res = await fetch('/api/crawl/trigger', { method: 'POST' });
+      const data = await res.json();
+      const runId = data.run_id;
+
+      showLog();
+      appendLog('Crawl triggered — run #' + runId);
+      label.textContent = 'Running…';
+
+      startPolling(runId);
+    } catch (e) {
+      btn.disabled = false;
+      icon.textContent = '▶';
+      label.textContent = 'Run Now';
+      alert('Failed to start crawl. Check the server logs.');
+    }
+  }
+
+  // ── Log helpers ──────────────────────────────────────────────────────────────
+  function showLog() {
+    document.getElementById('logWrap').classList.remove('hidden');
+  }
+
+  function appendLog(text) {
+    const box = document.getElementById('logBox');
+    box.textContent = text;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ── Poll for crawl status ────────────────────────────────────────────────────
+  function startPolling(runId) {
+    if (pollTimer) clearInterval(pollTimer);
+
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/crawl/runs/' + runId + '/log');
+        const data = await res.json();
+
+        if (data.log) appendLog(data.log.trim());
+
+        const done = data.status === 'completed' || data.status === 'failed';
+        if (done) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+
+          const statusEl = document.getElementById('logStatus');
+          const spinner = document.getElementById('spinner');
+          const btn = document.getElementById('triggerBtn');
+          const icon = document.getElementById('triggerIcon');
+          const label = document.getElementById('triggerLabel');
+
+          spinner.classList.remove('spin');
+          if (data.status === 'completed') {
+            statusEl.textContent = '✓ Complete';
+            statusEl.className = 'text-xs text-green-600 font-medium';
+            await loadRun(runId);
+          } else {
+            statusEl.textContent = '✗ Failed — see log';
+            statusEl.className = 'text-xs text-red-500 font-medium';
+          }
+
+          btn.disabled = false;
+          icon.textContent = '▶';
+          label.textContent = 'Run Now';
+
+          refreshHistory();
+        }
+      } catch (e) { /* ignore transient errors */ }
+    }, 2000);
+  }
+
+  // ── Load jobs for a specific run ─────────────────────────────────────────────
+  async function loadRun(runId) {
+    try {
+      const res = await fetch('/api/crawl/runs/' + runId + '/jobs');
+      const jobs = await res.json();
+
+      document.getElementById('jobsTitle').textContent =
+        'Run #' + runId + ' — ' + jobs.length + ' role' + (jobs.length !== 1 ? 's' : '');
+
+      renderJobs(jobs);
+      highlightRun(runId);
+    } catch (e) {
+      console.error('loadRun failed', e);
+    }
+  }
+
+  function highlightRun(runId) {
+    document.querySelectorAll('.run-row').forEach(el => {
+      el.classList.toggle('bg-blue-50', Number(el.dataset.runId) === runId);
+      el.classList.toggle('border-blue-200', Number(el.dataset.runId) === runId);
+    });
+  }
+
+  // ── Refresh history sidebar ──────────────────────────────────────────────────
+  async function refreshHistory() {
+    try {
+      const res = await fetch('/api/crawl/runs');
+      const runs = await res.json();
+
+      const list = document.getElementById('historyList');
+      list.innerHTML = runs.map(r => {
+        const badge = r.status === 'completed'
+          ? 'bg-green-100 text-green-700'
+          : r.status === 'running'
+          ? 'bg-yellow-100 text-yellow-700'
+          : 'bg-red-100 text-red-700';
+        const date = r.started_at ? r.started_at.slice(0, 16) : '—';
+        return `<div onclick="loadRun(${r.id})"
+          class="flex items-center justify-between text-xs px-3 py-2.5 rounded-lg cursor-pointer hover:bg-gray-50 transition border border-transparent hover:border-gray-100 run-row"
+          data-run-id="${r.id}">
+          <div class="flex items-center gap-2">
+            <span class="text-gray-500 font-mono">#${r.id}</span>
+            <span class="text-gray-400">${date}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-gray-600 font-medium">${r.jobs_found} jobs</span>
+            <span class="px-2 py-0.5 rounded-full font-medium text-[11px] ${badge}">${r.status}</span>
+          </div>
+        </div>`;
+      }).join('');
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Render jobs table ────────────────────────────────────────────────────────
+  function esc(s) {
+    if (!s) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderJobs(jobs) {
+    const container = document.getElementById('jobsContainer');
+    if (!jobs.length) {
+      container.innerHTML = `
+        <div class="text-center py-16 text-gray-300">
+          <div class="text-5xl mb-3">🔍</div>
+          <p class="font-semibold text-gray-400">No matching roles in this run</p>
+          <p class="text-sm mt-1">Try broadening your search criteria</p>
+        </div>`;
+      return;
+    }
+
+    const rows = jobs.map(j => {
+      const title = j.apply_url
+        ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium text-sm leading-tight block">${esc(j.title) || 'N/A'}</a>`
+        : `<span class="font-medium text-sm">${esc(j.title) || 'N/A'}</span>`;
+      const desc = j.description
+        ? `<p class="text-xs text-gray-400 mt-0.5 leading-snug">${esc(j.description).slice(0, 90)}${j.description.length > 90 ? '…' : ''}</p>`
+        : '';
+      return `
+        <tr class="border-b border-gray-50 hover:bg-gray-50">
+          <td class="py-3 pr-4">${title}${desc}</td>
+          <td class="py-3 pr-4 text-sm text-gray-700">${esc(j.company) || '—'}</td>
+          <td class="py-3 pr-4 text-xs text-gray-500">${esc(j.location) || '—'}</td>
+          <td class="py-3 pr-4 text-xs text-gray-500 whitespace-nowrap">${esc(j.salary) || '—'}</td>
+          <td class="py-3 pr-4"><span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[11px] font-medium">${esc(j.job_type) || '—'}</span></td>
+          <td class="py-3 pr-4 text-xs text-gray-500">${esc(j.date_posted) || '—'}</td>
+          <td class="py-3 text-xs text-gray-400">${esc(j.source) || '—'}</td>
+        </tr>`;
+    }).join('');
+
+    container.innerHTML = `
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-100">
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Type</th>
+            <th class="text-left pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
+            <th class="text-left pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+</script>
+
+</body>
+</html>
