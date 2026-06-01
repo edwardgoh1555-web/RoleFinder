@@ -82,7 +82,52 @@
 
   <div id="acceptedContainer">
     {% if accepted_jobs %}
-      {{ _render_accepted_table(accepted_jobs) }}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100">
+          <th class="pb-3 pr-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-center">Score</th>
+          <th class="pb-3 pr-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Category</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Company</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
+          <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+        </tr></thead>
+        <tbody>
+        {% for j in accepted_jobs %}
+          {% set score = j.fit_score or 0 %}
+          {% set score_cls = 'score-90' if score >= 90 else ('score-80' if score >= 80 else ('score-70' if score >= 70 else 'score-lo')) %}
+          {% set cat = j.fit_category or '' %}
+          {% set cat_cls = 'badge-bull' if cat == 'Bullseye' else ('badge-strong' if cat == 'Strong fit' else ('badge-stretch' if cat in ('Stretch','Backup') else 'badge-rej')) %}
+          <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-3 pr-3 text-center align-top">
+              <span class="{{ score_cls }} text-xs font-bold px-2 py-0.5 rounded-full">{{ score }}</span>
+            </td>
+            <td class="py-3 pr-3 align-top">
+              <span class="{{ cat_cls }} text-[11px] font-semibold px-2 py-0.5 rounded-full">{{ cat or '—' }}</span>
+            </td>
+            <td class="py-3 pr-4 align-top min-w-[200px]">
+              {% if j.apply_url %}
+                <a href="{{ j.apply_url }}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium">{{ j.title or 'N/A' }}</a>
+              {% else %}
+                <span class="font-medium">{{ j.title or 'N/A' }}</span>
+              {% endif %}
+              {% if j.duplicate_seen_before %}<span class="ml-2 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">seen before</span>{% endif %}
+              {% if j.evaluator_reason %}<p class="text-xs text-green-700 mt-0.5">✓ {{ j.evaluator_reason }}</p>{% endif %}
+              {% if j.main_risk %}<p class="text-xs text-amber-700 mt-0.5">⚠ {{ j.main_risk }}</p>{% endif %}
+              {% if j.application_angle %}<p class="text-xs text-blue-700 mt-0.5">→ {{ j.application_angle }}</p>{% endif %}
+            </td>
+            <td class="py-3 pr-4 text-sm text-gray-700 align-top">{{ j.company or '—' }}</td>
+            <td class="py-3 pr-4 text-xs text-gray-500 align-top">{{ j.location or '—' }}</td>
+            <td class="py-3 pr-4 text-xs text-gray-500 align-top whitespace-nowrap">{{ j.salary or '—' }}</td>
+            <td class="py-3 pr-4 text-xs text-gray-500 align-top">{{ j.date_posted or '—' }}</td>
+            <td class="py-3 text-xs text-gray-400 align-top">{{ j.source or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
     <div class="text-center py-16 text-gray-300">
       <div class="text-5xl mb-3">🎯</div>
@@ -105,7 +150,33 @@
   </div>
   <div id="missesContainer">
     {% if rejected_jobs %}
-      {{ _render_misses_table(rejected_jobs) }}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100">
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Role</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Score</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Rejection Type</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Reason</th>
+          <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+        </tr></thead>
+        <tbody>
+        {% for j in rejected_jobs %}
+          {% set score = j.fit_score or 0 %}
+          {% set score_cls = 'score-90' if score >= 90 else ('score-80' if score >= 80 else ('score-70' if score >= 70 else 'score-lo')) %}
+          <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="py-2.5 pr-4 text-sm">{{ j.title or 'N/A' }}<br>
+                <span class="text-xs text-gray-400">{{ j.company or '' }}</span></td>
+            <td class="py-2.5 pr-4">
+              <span class="{{ score_cls }} text-xs font-bold px-2 py-0.5 rounded-full">{{ score }}</span>
+            </td>
+            <td class="py-2.5 pr-4 text-xs text-amber-700">{{ (j.rejection_type or '—').replace('_', ' ') }}</td>
+            <td class="py-2.5 pr-4 text-xs text-gray-500">{{ j.evaluator_reason or '—' }}</td>
+            <td class="py-2.5 text-xs text-gray-400">{{ j.source or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
     <div class="text-center py-16 text-gray-300">
       <div class="text-5xl mb-3">🔍</div>
