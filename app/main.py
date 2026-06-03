@@ -23,8 +23,8 @@ from app.database import (
     get_run_log,
     init_db,
     set_config,
-    set_job_applied,
     set_job_deleted,
+    set_job_status,
 )
 from app.scheduler import setup_scheduler
 
@@ -140,13 +140,15 @@ def api_delete_job(job_id: int):
     return {"ok": True}
 
 
-class AppliedUpdate(BaseModel):
-    applied: bool
+class StatusUpdate(BaseModel):
+    status: str  # 'applied', 'maybe', or '' for none
 
 
-@app.post("/api/jobs/{job_id}/applied")
-def api_set_applied(job_id: int, body: AppliedUpdate):
-    set_job_applied(job_id, body.applied)
+@app.post("/api/jobs/{job_id}/status")
+def api_set_status(job_id: int, body: StatusUpdate):
+    if body.status not in ("applied", "maybe", ""):
+        raise HTTPException(400, "status must be 'applied', 'maybe', or ''")
+    set_job_status(job_id, body.status)
     return {"ok": True}
 
 

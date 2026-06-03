@@ -101,7 +101,9 @@
           {% set score_cls = 'score-90' if score >= 90 else ('score-80' if score >= 80 else ('score-70' if score >= 70 else 'score-lo')) %}
           {% set cat = j.fit_category or '' %}
           {% set cat_cls = 'badge-bull' if cat == 'Bullseye' else ('badge-strong' if cat == 'Strong fit' else ('badge-stretch' if cat in ('Stretch','Backup') else 'badge-rej')) %}
-          <tr id="job-row-{{ j.id }}" class="border-b border-gray-50 {% if j.applied %}bg-green-50{% else %}hover:bg-gray-50{% endif %}">
+          {% set status = 'applied' if j.applied else ('maybe' if j.maybe else '') %}
+          <tr id="job-row-{{ j.id }}" data-status="{{ status }}"
+              class="border-b border-gray-50 {% if j.applied %}bg-green-50{% elif j.maybe %}bg-yellow-50{% else %}hover:bg-gray-50{% endif %}">
             <td class="py-3 pr-3 text-center align-top">
               <span class="{{ score_cls }} text-xs font-bold px-2 py-0.5 rounded-full">{{ score }}</span>
             </td>
@@ -125,12 +127,16 @@
             <td class="py-3 pr-4 text-xs text-gray-500 align-top">{{ j.date_posted or '—' }}</td>
             <td class="py-3 pr-4 text-xs text-gray-400 align-top">{{ j.source or '—' }}</td>
             <td class="py-3 align-top text-right whitespace-nowrap">
-              <button onclick="toggleApplied({{ j.id }})"
+              <button onclick="setStatus({{ j.id }}, 'applied')"
                 id="applied-btn-{{ j.id }}"
-                data-applied="{{ 'true' if j.applied else 'false' }}"
-                title="{{ 'Undo applied' if j.applied else 'Mark as applied' }}"
+                title="{{ 'Undo applied' if status == 'applied' else 'Mark as applied' }}"
                 class="inline-flex items-center justify-center w-7 h-7 rounded-full mr-1 transition
-                       {% if j.applied %}bg-green-500 text-white{% else %}border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600{% endif %}">✓</button>
+                       {% if status == 'applied' %}bg-green-500 text-white{% else %}border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600{% endif %}">✓</button>
+              <button onclick="setStatus({{ j.id }}, 'maybe')"
+                id="maybe-btn-{{ j.id }}"
+                title="{{ 'Undo unsure' if status == 'maybe' else 'Mark as unsure' }}"
+                class="inline-flex items-center justify-center w-7 h-7 rounded-full mr-1 transition
+                       {% if status == 'maybe' %}bg-yellow-400 text-yellow-900{% else %}border border-gray-300 text-gray-400 hover:border-yellow-400 hover:text-yellow-600{% endif %}">?</button>
               <button onclick="deleteJob({{ j.id }})"
                 title="Remove from list"
                 class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-gray-300 text-gray-400 hover:border-red-400 hover:text-red-500 transition">✕</button>
@@ -468,35 +474,45 @@ async function deleteJob(id) {
   } catch (e) { alert('Failed to remove job.'); }
 }
 
-// ── Toggle applied ─────────────────────────────────────────────────────────
-async function toggleApplied(id) {
-  const btn = document.getElementById('applied-btn-' + id);
+// ── Set job status (applied / maybe / none — mutually exclusive) ───────────
+const _BASE_BTN = 'inline-flex items-center justify-center w-7 h-7 rounded-full transition';
+
+function applyStatusUI(id, status) {
+  const row        = document.getElementById('job-row-' + id);
+  const appliedBtn = document.getElementById('applied-btn-' + id);
+  const maybeBtn   = document.getElementById('maybe-btn-' + id);
+  if (!row) return;
+
+  row.dataset.status = status;
+  row.classList.remove('bg-green-50', 'bg-yellow-50', 'hover:bg-gray-50');
+  if      (status === 'applied') row.classList.add('bg-green-50');
+  else if (status === 'maybe')   row.classList.add('bg-yellow-50');
+  else                           row.classList.add('hover:bg-gray-50');
+
+  appliedBtn.className = _BASE_BTN + ' mr-1 ' + (status === 'applied'
+    ? 'bg-green-500 text-white'
+    : 'border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600');
+  appliedBtn.title = status === 'applied' ? 'Undo applied' : 'Mark as applied';
+
+  maybeBtn.className = _BASE_BTN + ' mr-1 ' + (status === 'maybe'
+    ? 'bg-yellow-400 text-yellow-900'
+    : 'border border-gray-300 text-gray-400 hover:border-yellow-400 hover:text-yellow-600');
+  maybeBtn.title = status === 'maybe' ? 'Undo unsure' : 'Mark as unsure';
+}
+
+async function setStatus(id, clicked) {
   const row = document.getElementById('job-row-' + id);
-  const current = btn.dataset.applied === 'true';
-  const newVal = !current;
+  const current = row ? (row.dataset.status || '') : '';
+  const newStatus = current === clicked ? '' : clicked;  // toggle off if re-clicking
   try {
-    const res = await fetch('/api/jobs/' + id + '/applied', {
+    const res = await fetch('/api/jobs/' + id + '/status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ applied: newVal }),
+      body: JSON.stringify({ status: newStatus }),
     });
     if (!res.ok) throw new Error();
-    btn.dataset.applied = String(newVal);
-    btn.title = newVal ? 'Undo applied' : 'Mark as applied';
-    if (newVal) {
-      row.classList.add('bg-green-50');
-      row.classList.remove('hover:bg-gray-50');
-      btn.className = btn.className
-        .replace('border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600', '')
-        + ' bg-green-500 text-white';
-    } else {
-      row.classList.remove('bg-green-50');
-      row.classList.add('hover:bg-gray-50');
-      btn.className = btn.className
-        .replace('bg-green-500 text-white', '')
-        + ' border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600';
-    }
-  } catch (e) { alert('Failed to update applied status.'); }
+    applyStatusUI(id, newStatus);
+  } catch (e) { alert('Failed to update status.'); }
 }
 
 function updateTabCount(tab, count) {
@@ -564,11 +580,14 @@ function categoryPill(cat) {
 function renderAccepted(jobs) {
   if (!jobs.length) return emptyState('🎯', 'No accepted roles');
   const rows = jobs.map(j => {
-    const applied = !!j.applied;
-    const rowCls = `border-b border-gray-50 ${applied ? 'bg-green-50' : 'hover:bg-gray-50'}`;
-    const appliedBtnCls = applied
+    const status = j.applied ? 'applied' : (j.maybe ? 'maybe' : '');
+    const rowCls = `border-b border-gray-50 ${status === 'applied' ? 'bg-green-50' : status === 'maybe' ? 'bg-yellow-50' : 'hover:bg-gray-50'}`;
+    const appliedBtnCls = status === 'applied'
       ? 'bg-green-500 text-white'
       : 'border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600';
+    const maybeBtnCls = status === 'maybe'
+      ? 'bg-yellow-400 text-yellow-900'
+      : 'border border-gray-300 text-gray-400 hover:border-yellow-400 hover:text-yellow-600';
     const title = j.apply_url
       ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium">${esc(j.title)||'N/A'}</a>`
       : `<span class="font-medium">${esc(j.title)||'N/A'}</span>`;
@@ -579,7 +598,7 @@ function renderAccepted(jobs) {
     ].join('');
     const dupe = j.duplicate_seen_before
       ? '<span class="ml-2 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">seen before</span>' : '';
-    return `<tr id="job-row-${j.id}" class="${rowCls}">
+    return `<tr id="job-row-${j.id}" data-status="${status}" class="${rowCls}">
       <td class="py-3 pr-3 text-center align-top">${scoreBadge(j.fit_score)}</td>
       <td class="py-3 pr-3 align-top">${categoryPill(j.fit_category)}</td>
       <td class="py-3 pr-4 align-top min-w-[200px]">${title}${dupe}${subs}</td>
@@ -589,11 +608,14 @@ function renderAccepted(jobs) {
       <td class="py-3 pr-4 text-xs text-gray-500 align-top">${esc(j.date_posted)||'—'}</td>
       <td class="py-3 pr-4 text-xs text-gray-400 align-top">${esc(j.source)||'—'}</td>
       <td class="py-3 align-top text-right whitespace-nowrap">
-        <button onclick="toggleApplied(${j.id})" id="applied-btn-${j.id}" data-applied="${applied}"
-          title="${applied ? 'Undo applied' : 'Mark as applied'}"
-          class="inline-flex items-center justify-center w-7 h-7 rounded-full mr-1 transition ${appliedBtnCls}">✓</button>
+        <button onclick="setStatus(${j.id},'applied')" id="applied-btn-${j.id}"
+          title="${status === 'applied' ? 'Undo applied' : 'Mark as applied'}"
+          class="${_BASE_BTN} mr-1 ${appliedBtnCls}">✓</button>
+        <button onclick="setStatus(${j.id},'maybe')" id="maybe-btn-${j.id}"
+          title="${status === 'maybe' ? 'Undo unsure' : 'Mark as unsure'}"
+          class="${_BASE_BTN} mr-1 ${maybeBtnCls}">?</button>
         <button onclick="deleteJob(${j.id})" title="Remove from list"
-          class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-gray-300 text-gray-400 hover:border-red-400 hover:text-red-500 transition">✕</button>
+          class="${_BASE_BTN} border border-gray-300 text-gray-400 hover:border-red-400 hover:text-red-500">✕</button>
       </td>
     </tr>`;
   }).join('');

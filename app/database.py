@@ -244,6 +244,7 @@ def init_db():
             ("raw_relevance_reason", "TEXT"),
             ("deleted",             "INTEGER NOT NULL DEFAULT 0"),
             ("applied",             "INTEGER NOT NULL DEFAULT 0"),
+            ("maybe",               "INTEGER NOT NULL DEFAULT 0"),
         ]:
             _add_col(conn, "jobs", col, defn)
 
@@ -491,9 +492,10 @@ def set_job_deleted(job_id: int) -> None:
         conn.execute("UPDATE jobs SET deleted = 1 WHERE id = ?", (job_id,))
 
 
-def set_job_applied(job_id: int, applied: bool) -> None:
+def set_job_status(job_id: int, status: str) -> None:
+    """Set job status. status: 'applied', 'maybe', or '' for none. Mutually exclusive."""
     with get_db() as conn:
         conn.execute(
-            "UPDATE jobs SET applied = ? WHERE id = ?",
-            (1 if applied else 0, job_id),
+            "UPDATE jobs SET applied = ?, maybe = ? WHERE id = ?",
+            (1 if status == "applied" else 0, 1 if status == "maybe" else 0, job_id),
         )
