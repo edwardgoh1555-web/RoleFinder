@@ -20,6 +20,7 @@ import re
 from collections import Counter
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.database import (
@@ -211,6 +212,46 @@ def _deduplicate(candidates: list[dict]) -> list[dict]:
     return unique
 
 
+# ── URL verification ──────────────────────────────────────────────────────
+
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+_DEAD_STATUSES = frozenset({404, 410})
+
+
+async def _check_one_url(client: httpx.AsyncClient, sem: asyncio.Semaphore, url: str) -> bool:
+    """Return False only if the URL is definitively dead (DNS error, timeout, 404/410)."""
+    async with sem:
+        try:
+            r = await client.head(url, follow_redirects=True, timeout=6.0)
+            if r.status_code == 405:
+                r = await client.get(url, follow_redirects=True, timeout=6.0)
+            return r.status_code not in _DEAD_STATUSES
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ConnectTimeout):
+            return False
+        except Exception:
+            return True  # unknown error — give benefit of the doubt
+
+
+async def _verify_urls(candidates: list[dict], run_id: int) -> list[dict]:
+    """Drop candidates whose apply URL is definitively unreachable."""
+    sem = asyncio.Semaphore(10)
+    async with httpx.AsyncClient(headers=_HTTP_HEADERS, timeout=8.0) as client:
+        checks = await asyncio.gather(
+            *[_check_one_url(client, sem, j.get("apply_url", "")) for j in candidates]
+        )
+    live = [j for j, ok in zip(candidates, checks) if ok]
+    dead = len(candidates) - len(live)
+    if dead:
+        append_crawl_log(run_id, f"URL check: removed {dead} dead link(s), {len(live)} remain")
+    return live
+
+
 # ── Stage 2: Evaluator ────────────────────────────────────────────────────────
 
 def _format_for_eval(job: dict) -> str:
@@ -335,6 +376,10 @@ async def run_crawl(run_id: int) -> list[dict]:
     # ── Deduplicate ──
     unique = _deduplicate(all_raw)
     append_crawl_log(run_id, f"Dedup: {len(all_raw)} → {len(unique)} unique candidates")
+
+    # ── URL verification ──
+    append_crawl_log(run_id, f"Verifying {len(unique)} URLs...")
+    unique = await _verify_urls(unique, run_id)
 
     # ── Stage 2: Evaluation ──
     append_crawl_log(run_id, f"Stage 2: Evaluating {len(unique)} candidates...")
