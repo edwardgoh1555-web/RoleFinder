@@ -92,7 +92,8 @@
           <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
           <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
           <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
-          <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+          <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+          <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-right">Actions</th>
         </tr></thead>
         <tbody>
         {% for j in accepted_jobs %}
@@ -100,7 +101,7 @@
           {% set score_cls = 'score-90' if score >= 90 else ('score-80' if score >= 80 else ('score-70' if score >= 70 else 'score-lo')) %}
           {% set cat = j.fit_category or '' %}
           {% set cat_cls = 'badge-bull' if cat == 'Bullseye' else ('badge-strong' if cat == 'Strong fit' else ('badge-stretch' if cat in ('Stretch','Backup') else 'badge-rej')) %}
-          <tr class="border-b border-gray-50 hover:bg-gray-50">
+          <tr id="job-row-{{ j.id }}" class="border-b border-gray-50 {% if j.applied %}bg-green-50{% else %}hover:bg-gray-50{% endif %}">
             <td class="py-3 pr-3 text-center align-top">
               <span class="{{ score_cls }} text-xs font-bold px-2 py-0.5 rounded-full">{{ score }}</span>
             </td>
@@ -122,7 +123,18 @@
             <td class="py-3 pr-4 text-xs text-gray-500 align-top">{{ j.location or '—' }}</td>
             <td class="py-3 pr-4 text-xs text-gray-500 align-top whitespace-nowrap">{{ j.salary or '—' }}</td>
             <td class="py-3 pr-4 text-xs text-gray-500 align-top">{{ j.date_posted or '—' }}</td>
-            <td class="py-3 text-xs text-gray-400 align-top">{{ j.source or '—' }}</td>
+            <td class="py-3 pr-4 text-xs text-gray-400 align-top">{{ j.source or '—' }}</td>
+            <td class="py-3 align-top text-right whitespace-nowrap">
+              <button onclick="toggleApplied({{ j.id }})"
+                id="applied-btn-{{ j.id }}"
+                data-applied="{{ 'true' if j.applied else 'false' }}"
+                title="{{ 'Undo applied' if j.applied else 'Mark as applied' }}"
+                class="inline-flex items-center justify-center w-7 h-7 rounded-full mr-1 transition
+                       {% if j.applied %}bg-green-500 text-white{% else %}border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600{% endif %}">✓</button>
+              <button onclick="deleteJob({{ j.id }})"
+                title="Remove from list"
+                class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-gray-300 text-gray-400 hover:border-red-400 hover:text-red-500 transition">✕</button>
+            </td>
           </tr>
         {% endfor %}
         </tbody>
@@ -382,7 +394,7 @@ function startPolling(runId) {
         if (data.status === 'completed') {
           statusEl.textContent = '✓ Complete';
           statusEl.className = 'text-xs text-green-600 font-medium';
-          await loadRun(runId);
+          await refreshJobLists();
           refreshHistory();
         } else {
           statusEl.textContent = '✗ Failed';
@@ -393,31 +405,98 @@ function startPolling(runId) {
   }, 2000);
 }
 
-// ── Load run ───────────────────────────────────────────────────────────────
+// ── Load run (log only — job lists are always all-time) ────────────────────
 async function loadRun(runId) {
   try {
+    const res  = await fetch('/api/crawl/runs/' + runId + '/log');
+    const data = await res.json();
+    const box  = document.getElementById('logBox');
+    if (data.log) { box.textContent = data.log.trim(); box.scrollTop = box.scrollHeight; }
+    const statusEl = document.getElementById('logStatus');
+    if (data.status === 'completed') {
+      statusEl.textContent = '✓ Complete';
+      statusEl.className = 'text-xs text-green-600 font-medium';
+    } else if (data.status === 'running') {
+      statusEl.textContent = '⏳ Running…';
+      statusEl.className = 'text-xs text-yellow-600 font-medium';
+    } else {
+      statusEl.textContent = data.status || '';
+      statusEl.className = 'text-xs text-gray-400';
+    }
+    highlightRun(runId);
+  } catch (e) { console.error(e); }
+}
+
+// ── Refresh all-time deduped job lists ─────────────────────────────────────
+async function refreshJobLists() {
+  try {
     const [accRes, rejRes] = await Promise.all([
-      fetch('/api/crawl/runs/' + runId + '/jobs?decision=accepted'),
-      fetch('/api/crawl/runs/' + runId + '/jobs?decision=rejected'),
+      fetch('/api/jobs?decision=accepted'),
+      fetch('/api/jobs?decision=rejected'),
     ]);
     const accepted = await accRes.json();
     const rejected = await rejRes.json();
 
     document.getElementById('acceptedTitle').textContent =
-      'Run #' + runId + ' — ' + accepted.length + ' accepted role' + (accepted.length !== 1 ? 's' : '');
+      accepted.length + ' accepted role' + (accepted.length !== 1 ? 's' : '') + ' (all runs)';
     document.getElementById('missesTitle').textContent =
       rejected.length + ' rejected role' + (rejected.length !== 1 ? 's' : '');
 
     document.getElementById('acceptedContainer').innerHTML =
-      accepted.length ? renderAccepted(accepted) : emptyState('🎯', 'No accepted roles in this run');
+      accepted.length ? renderAccepted(accepted) : emptyState('🎯', 'No accepted roles yet');
     document.getElementById('missesContainer').innerHTML =
-      rejected.length ? renderMisses(rejected) : emptyState('🔍', 'No rejections in this run');
+      rejected.length ? renderMisses(rejected) : emptyState('🔍', 'No near-misses yet');
 
-    // Update tab counts
     updateTabCount('accepted', accepted.length);
     updateTabCount('misses', rejected.length);
-    highlightRun(runId);
   } catch (e) { console.error(e); }
+}
+
+// ── Delete job ─────────────────────────────────────────────────────────────
+async function deleteJob(id) {
+  try {
+    const res = await fetch('/api/jobs/' + id, { method: 'DELETE' });
+    if (!res.ok) throw new Error();
+    const row = document.getElementById('job-row-' + id);
+    if (row) row.remove();
+    const remaining = document.querySelectorAll('#acceptedContainer tr[id^="job-row-"]').length;
+    updateTabCount('accepted', remaining);
+    if (remaining === 0) {
+      document.getElementById('acceptedContainer').innerHTML =
+        emptyState('🎯', 'No accepted roles yet');
+    }
+  } catch (e) { alert('Failed to remove job.'); }
+}
+
+// ── Toggle applied ─────────────────────────────────────────────────────────
+async function toggleApplied(id) {
+  const btn = document.getElementById('applied-btn-' + id);
+  const row = document.getElementById('job-row-' + id);
+  const current = btn.dataset.applied === 'true';
+  const newVal = !current;
+  try {
+    const res = await fetch('/api/jobs/' + id + '/applied', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ applied: newVal }),
+    });
+    if (!res.ok) throw new Error();
+    btn.dataset.applied = String(newVal);
+    btn.title = newVal ? 'Undo applied' : 'Mark as applied';
+    if (newVal) {
+      row.classList.add('bg-green-50');
+      row.classList.remove('hover:bg-gray-50');
+      btn.className = btn.className
+        .replace('border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600', '')
+        + ' bg-green-500 text-white';
+    } else {
+      row.classList.remove('bg-green-50');
+      row.classList.add('hover:bg-gray-50');
+      btn.className = btn.className
+        .replace('bg-green-500 text-white', '')
+        + ' border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600';
+    }
+  } catch (e) { alert('Failed to update applied status.'); }
 }
 
 function updateTabCount(tab, count) {
@@ -485,6 +564,11 @@ function categoryPill(cat) {
 function renderAccepted(jobs) {
   if (!jobs.length) return emptyState('🎯', 'No accepted roles');
   const rows = jobs.map(j => {
+    const applied = !!j.applied;
+    const rowCls = `border-b border-gray-50 ${applied ? 'bg-green-50' : 'hover:bg-gray-50'}`;
+    const appliedBtnCls = applied
+      ? 'bg-green-500 text-white'
+      : 'border border-gray-300 text-gray-400 hover:border-green-500 hover:text-green-600';
     const title = j.apply_url
       ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline font-medium">${esc(j.title)||'N/A'}</a>`
       : `<span class="font-medium">${esc(j.title)||'N/A'}</span>`;
@@ -495,7 +579,7 @@ function renderAccepted(jobs) {
     ].join('');
     const dupe = j.duplicate_seen_before
       ? '<span class="ml-2 text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">seen before</span>' : '';
-    return `<tr class="border-b border-gray-50 hover:bg-gray-50">
+    return `<tr id="job-row-${j.id}" class="${rowCls}">
       <td class="py-3 pr-3 text-center align-top">${scoreBadge(j.fit_score)}</td>
       <td class="py-3 pr-3 align-top">${categoryPill(j.fit_category)}</td>
       <td class="py-3 pr-4 align-top min-w-[200px]">${title}${dupe}${subs}</td>
@@ -503,7 +587,14 @@ function renderAccepted(jobs) {
       <td class="py-3 pr-4 text-xs text-gray-500 align-top">${esc(j.location)||'—'}</td>
       <td class="py-3 pr-4 text-xs text-gray-500 align-top whitespace-nowrap">${esc(j.salary)||'—'}</td>
       <td class="py-3 pr-4 text-xs text-gray-500 align-top">${esc(j.date_posted)||'—'}</td>
-      <td class="py-3 text-xs text-gray-400 align-top">${esc(j.source)||'—'}</td>
+      <td class="py-3 pr-4 text-xs text-gray-400 align-top">${esc(j.source)||'—'}</td>
+      <td class="py-3 align-top text-right whitespace-nowrap">
+        <button onclick="toggleApplied(${j.id})" id="applied-btn-${j.id}" data-applied="${applied}"
+          title="${applied ? 'Undo applied' : 'Mark as applied'}"
+          class="inline-flex items-center justify-center w-7 h-7 rounded-full mr-1 transition ${appliedBtnCls}">✓</button>
+        <button onclick="deleteJob(${j.id})" title="Remove from list"
+          class="inline-flex items-center justify-center w-7 h-7 rounded-full border border-gray-300 text-gray-400 hover:border-red-400 hover:text-red-500 transition">✕</button>
+      </td>
     </tr>`;
   }).join('');
   return `<div class="overflow-x-auto"><table class="w-full text-sm">
@@ -515,7 +606,8 @@ function renderAccepted(jobs) {
       <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Location</th>
       <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Salary</th>
       <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Posted</th>
-      <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+      <th class="pb-3 pr-4 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Source</th>
+      <th class="pb-3 text-[11px] font-semibold text-gray-400 uppercase tracking-wide text-right">Actions</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;

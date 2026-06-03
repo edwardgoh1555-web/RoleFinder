@@ -242,6 +242,8 @@ def init_db():
             ("normalized_job_key",  "TEXT"),
             ("duplicate_seen_before", "INTEGER DEFAULT 0"),
             ("raw_relevance_reason", "TEXT"),
+            ("deleted",             "INTEGER NOT NULL DEFAULT 0"),
+            ("applied",             "INTEGER NOT NULL DEFAULT 0"),
         ]:
             _add_col(conn, "jobs", col, defn)
 
@@ -449,3 +451,49 @@ def get_latest_completed_run_id() -> int | None:
             "SELECT id FROM crawl_runs WHERE status='completed' ORDER BY completed_at DESC LIMIT 1"
         ).fetchone()
         return row["id"] if row else None
+
+
+def get_all_unique_jobs(decision: str) -> list[dict]:
+    """All non-deleted jobs with the given decision, deduplicated across runs.
+
+    When the same URL or title+company appears in multiple runs, the highest-
+    scoring instance is kept (ties broken by most-recently inserted id).
+    """
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT * FROM jobs
+               WHERE evaluator_decision = ?
+                 AND (deleted IS NULL OR deleted = 0)
+               ORDER BY COALESCE(fit_score, 0) DESC, id DESC""",
+            (decision,),
+        ).fetchall()
+
+    seen_hashes: set[str] = set()
+    seen_keys: set[str] = set()
+    unique = []
+    for row in [dict(r) for r in rows]:
+        h = row.get("url_hash") or ""
+        k = row.get("normalized_job_key") or "|"
+        if h and h in seen_hashes:
+            continue
+        if k != "|" and k in seen_keys:
+            continue
+        if h:
+            seen_hashes.add(h)
+        if k != "|":
+            seen_keys.add(k)
+        unique.append(row)
+    return unique
+
+
+def set_job_deleted(job_id: int) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE jobs SET deleted = 1 WHERE id = ?", (job_id,))
+
+
+def set_job_applied(job_id: int, applied: bool) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE jobs SET applied = ? WHERE id = ?",
+            (1 if applied else 0, job_id),
+        )

@@ -15,6 +15,7 @@ from app.database import (
     create_crawl_run,
     finish_crawl_run,
     get_all_config,
+    get_all_unique_jobs,
     get_config,
     get_jobs_for_run_by_decision,
     get_latest_completed_run_id,
@@ -22,6 +23,8 @@ from app.database import (
     get_run_log,
     init_db,
     set_config,
+    set_job_applied,
+    set_job_deleted,
 )
 from app.scheduler import setup_scheduler
 
@@ -54,14 +57,13 @@ async def dashboard():
     cfg = get_all_config()
     runs = get_recent_runs(10)
     latest_run_id = get_latest_completed_run_id()
-    accepted_jobs = get_jobs_for_run_by_decision(latest_run_id, "accepted") if latest_run_id else []
-    rejected_jobs = get_jobs_for_run_by_decision(latest_run_id, "rejected") if latest_run_id else []
+    accepted_jobs = get_all_unique_jobs("accepted")
+    rejected_jobs = get_all_unique_jobs("rejected")
 
     crawl_hour   = int(os.environ.get("CRAWL_HOUR", "5"))
     crawl_minute = int(os.environ.get("CRAWL_MINUTE", "0"))
     schedule_label = f"{crawl_hour:02d}:{crawl_minute:02d} daily (server local time)"
 
-    # Parse query_families for display (one per line)
     try:
         qf_lines = "\n".join(json.loads(cfg.get("query_families") or "[]"))
     except Exception:
@@ -115,7 +117,6 @@ def api_set_config(body: ConfigUpdate):
         if val is not None:
             set_config(key, val.strip() if isinstance(val, str) else val)
 
-    # query_families arrives as newline-separated; store as JSON array
     if body.query_families is not None:
         lines = [l.strip() for l in body.query_families.splitlines() if l.strip()]
         set_config("query_families", json.dumps(lines))
@@ -123,6 +124,29 @@ def api_set_config(body: ConfigUpdate):
     if body.prompt is not None:
         set_config("role_search_prompt", body.prompt.strip())
 
+    return {"ok": True}
+
+
+# ── Jobs API ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/jobs")
+def api_get_all_jobs(decision: str = "accepted"):
+    return get_all_unique_jobs(decision)
+
+
+@app.delete("/api/jobs/{job_id}")
+def api_delete_job(job_id: int):
+    set_job_deleted(job_id)
+    return {"ok": True}
+
+
+class AppliedUpdate(BaseModel):
+    applied: bool
+
+
+@app.post("/api/jobs/{job_id}/applied")
+def api_set_applied(job_id: int, body: AppliedUpdate):
+    set_job_applied(job_id, body.applied)
     return {"ok": True}
 
 
